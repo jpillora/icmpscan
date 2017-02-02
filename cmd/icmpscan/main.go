@@ -11,6 +11,8 @@ import (
 	"github.com/jpillora/opts"
 )
 
+var VERSION = "0.0.0-src"
+
 func main() {
 	c := struct {
 		Interface string        `help:"Source interface" default:"chosen by OS"`
@@ -22,7 +24,7 @@ func main() {
 		Timeout: 1000 * time.Millisecond,
 	}
 
-	opts.New(&c).Name("icmpscan").Parse()
+	opts.New(&c).Name("icmpscan").Version(VERSION).Parse()
 
 	if !c.UseUDP && os.Getuid() != 0 {
 		c.UseUDP = true
