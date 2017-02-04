@@ -165,6 +165,9 @@ func newScan(spec Spec) (*scan, error) {
 				if src.To4() == nil {
 					continue
 				}
+				if ipmath.NetworkSize(net) > 256 {
+					continue
+				}
 				s.networks = append(s.networks, net)
 			}
 		}
@@ -191,6 +194,9 @@ func (s *scan) goNetwork(network *net.IPNet) {
 }
 
 func (s *scan) network(network *net.IPNet) error {
+	//
+	// log.Printf("[icmpscan] start: scan network %s", network)
+	// defer log.Printf("[icmpscan] end: scan network %s", network)
 	//icmp socket
 	conn, err := icmp.ListenPacket(s.srcProto, s.srcIP)
 	if err != nil {
