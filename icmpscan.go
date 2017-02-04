@@ -30,8 +30,10 @@ type Spec struct {
 
 //Host is a ICMP reponder
 type Host struct {
-	IP  net.IP        `json:"ip"`
-	RTT time.Duration `json:"rtt"`
+	Active bool          `json:"active"`
+	Error  string        `json:"error,omitempty"`
+	IP     net.IP        `json:"ip"`
+	RTT    time.Duration `json:"rtt,omitempty"`
 }
 
 //Hosts is a slice of Host
@@ -145,6 +147,9 @@ func scanNetwork(udp bool, srcIP string, network *net.IPNet, timeout time.Durati
 	if err != nil {
 		return nil, err
 	}
+	sentCount := 0
+	//channel open while reading responses
+	recievedAll := make(chan struct{})
 	//receive
 	readErr := make(chan error)
 	go func() {
@@ -170,25 +175,42 @@ func scanNetwork(udp bool, srcIP string, network *net.IPNet, timeout time.Durati
 				log.Printf("msg err: %s", err)
 				continue
 			}
-			reply := msg.Body.(*icmp.Echo)
+			reply, ok := msg.Body.(*icmp.Echo)
+			if !ok {
+				continue
+			}
 			if !bytes.Equal(ipmath.Hash(src), reply.Data) {
 				log.Printf("hash mismatch: %s", src)
 				continue
 			}
+			// switch b := msg.Body.(type) {
+			// case *icmp.Echo:
+			// case *icmp.DstUnreach:
+			//unknown
+			// case *icmp.PacketTooBig:
+			//unknown
+			// default:
+			//unknown
+			// }
 			rttsMut.Lock()
 			t0 := rtts[reply.Seq]
 			rttsMut.Unlock()
 
 			hosts = append(hosts, Host{
-				IP:  src,
-				RTT: time.Now().Sub(t0),
+				Active: true,
+				IP:     src,
+				RTT:    time.Now().Sub(t0),
 			})
+
+			//signal all hosts recieved
+			if len(hosts) == sentCount {
+				close(recievedAll)
+			}
 		}
 	}()
 	//loop through all unicast addresses
 	//send icmp echo request
 	id := rand.Int()
-	seq := 0
 	for curr := network.IP; network.Contains(curr); curr = ipmath.NextIP(curr) {
 		if !curr.IsGlobalUnicast() ||
 			ipmath.IsNetworkAddress(curr, network) ||
@@ -201,7 +223,7 @@ func scanNetwork(udp bool, srcIP string, network *net.IPNet, timeout time.Durati
 			Code: 0,
 			Body: &icmp.Echo{
 				ID:   id,
-				Seq:  seq,
+				Seq:  sentCount,
 				Data: ipmath.Hash(curr),
 			},
 		}).Marshal(nil)
@@ -218,15 +240,17 @@ func scanNetwork(udp bool, srcIP string, network *net.IPNet, timeout time.Durati
 			continue
 		}
 		rttsMut.Lock()
-		rtts[seq] = time.Now()
+		rtts[sentCount] = time.Now()
 		rttsMut.Unlock()
-		seq++
+		sentCount++
 	}
+
 	select {
 	case err := <-readErr:
 		return hosts, err
 	case <-time.After(timeout):
 		return hosts, nil
+	case <-recievedAll:
+		return hosts, nil
 	}
-	//TODO case ALL HOSTS RETURNED:
 }
