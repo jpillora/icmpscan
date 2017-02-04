@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"math/rand"
 	"net"
 	"regexp"
@@ -338,12 +337,11 @@ func (s *scan) receiveICMP(ip net.IP, network *net.IPNet, buff []byte) error {
 		target := strings.Join(ipRev, ".") + ".in-addr.arpa."
 		m.SetQuestion(target, dns.TypePTR)
 		r, _, err := s.dns.Exchange(&m, server+":53")
-		if err != nil {
-			log.Fatal(err)
-		}
-		if len(r.Answer) > 0 {
-			p := r.Answer[0].(*dns.PTR)
-			h.Hostname = strings.TrimSuffix(p.Ptr, ".")
+		if err == nil {
+			if len(r.Answer) > 0 {
+				p := r.Answer[0].(*dns.PTR)
+				h.Hostname = strings.TrimSuffix(p.Ptr, ".")
+			}
 		}
 	}
 	return nil
