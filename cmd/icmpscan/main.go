@@ -19,6 +19,8 @@ func main() {
 		Networks  []string      `type:"args" help:"<networks> is a list of subnets to scan (defaults to all interface subnets)"`
 		Timeout   time.Duration `help:"Scan timeout"`
 		UseUDP    bool          `help:"Use UDP (auto-enabled for non-root users)"`
+		Hostnames bool          `short:"n" help:"Reverse DNS lookup hostnames"`
+		DNSServer string        `help:"Server to perform DNS lookup hostnames against (defaults to X.X.X.1)"`
 		JSON      bool          `help:"Output results in JSON"`
 	}{
 		Timeout: 1000 * time.Millisecond,
@@ -35,6 +37,8 @@ func main() {
 		Networks:  c.Networks,
 		Timeout:   c.Timeout,
 		UseUDP:    c.UseUDP,
+		Hostnames: c.Hostnames,
+		DNSServer: c.DNSServer,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -48,6 +52,12 @@ func main() {
 	}
 
 	for i, host := range hosts {
-		fmt.Printf("[%03d] %15s (rtt: %s)\n", i+1, host.IP, host.RTT)
+		if host.Active {
+			fmt.Printf("[%03d] %15s", i+1, host.IP)
+			if host.Hostname != "" {
+				fmt.Printf(" %25s", host.Hostname)
+			}
+			fmt.Printf(" (%s)\n", host.RTT)
+		}
 	}
 }
