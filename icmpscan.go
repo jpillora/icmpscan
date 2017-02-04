@@ -2,7 +2,6 @@ package icmpscan
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"net"
@@ -13,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jpillora/arp"
 	"github.com/jpillora/ipmath"
 	"github.com/miekg/dns"
 
@@ -30,33 +30,8 @@ type Spec struct {
 	Timeout   time.Duration
 	UseUDP    bool
 	Hostnames bool
+	MACs      bool
 	DNSServer string
-}
-
-//Host is a ICMP reponder
-type Host struct {
-	Active   bool          `json:"active"`
-	Error    string        `json:"error,omitempty"`
-	IP       net.IP        `json:"ip"`
-	Hostname string        `json:"hostname,omitempty"`
-	RTT      time.Duration `json:"rtt,omitempty"`
-	//private fields
-	meta struct {
-		sync.Mutex
-		send    bool
-		sendErr error
-		sentAt  time.Time
-	}
-}
-
-//Hosts is a slice of Host
-type Hosts []*Host
-
-//Sort by IP
-func (h Hosts) Len() int      { return len(h) }
-func (h Hosts) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
-func (h Hosts) Less(i, j int) bool {
-	return binary.BigEndian.Uint32([]byte(h[i].IP.To4())) < binary.BigEndian.Uint32([]byte(h[j].IP.To4()))
 }
 
 //Run performs an ICMP scan/sweep with the given spec
@@ -84,6 +59,7 @@ type scan struct {
 	recvSuccess uint32
 	resultsMut  sync.Mutex
 	results     map[string]*Host
+	hostsMut    sync.Mutex
 	hosts       Hosts
 	dns         dns.Client
 }
@@ -175,6 +151,18 @@ func newScan(spec Spec) (*scan, error) {
 	return s, nil
 }
 
+func (s *scan) getHost(ip net.IP) *Host {
+	s.resultsMut.Lock()
+	defer s.resultsMut.Unlock()
+	ipstr := ip.String()
+	h, ok := s.results[ipstr]
+	if !ok {
+		h = &Host{IP: ip}
+		s.results[ipstr] = h
+	}
+	return h
+}
+
 func (s *scan) run() error {
 	//scan all chosen networks
 	for _, network := range s.networks {
@@ -183,6 +171,14 @@ func (s *scan) run() error {
 	if err := s.eg.Wait(); err != nil {
 		return err
 	}
+	//include mac addresses where known
+	if s.MACs {
+		t := arp.Table()
+		for _, h := range s.hosts {
+			h.MAC = t[h.IP.String()]
+		}
+	}
+	//sort by ip
 	sort.Sort(&s.hosts)
 	return nil
 }
@@ -258,7 +254,7 @@ func (s *scan) network(network *net.IPNet) error {
 }
 
 func (s *scan) sendICMP(conn *icmp.PacketConn, ip net.IP) {
-	h := s.resultHost(ip)
+	h := s.getHost(ip)
 	//lock/unlock
 	h.meta.Lock()
 	defer h.meta.Unlock()
@@ -295,15 +291,11 @@ func (s *scan) sendICMP(conn *icmp.PacketConn, ip net.IP) {
 }
 
 func (s *scan) receiveICMP(ip net.IP, network *net.IPNet, buff []byte) error {
-	h := s.resultHost(ip)
-	h.meta.Lock()
-	h.RTT = time.Now().Sub(h.meta.sentAt)
-	defer h.meta.Unlock()
+	receivedAt := time.Now()
+	//parse icmp buffer
 	msg, err := icmp.ParseMessage(protocolICMP, buff)
 	if err != nil {
-		err = fmt.Errorf("icmp message err: %s", err)
-		h.Error = err.Error()
-		return err
+		return fmt.Errorf("icmp message err: %s", err)
 	}
 	// switch b := msg.Body.(type) {
 	// case *icmp.Echo:
@@ -316,52 +308,31 @@ func (s *scan) receiveICMP(ip net.IP, network *net.IPNet, buff []byte) error {
 	// }
 	reply, ok := msg.Body.(*icmp.Echo)
 	if !ok {
-		err = fmt.Errorf("icmp non-echo response")
-		h.Error = err.Error()
-		return err
+		return fmt.Errorf("icmp non-echo response")
 	}
-	h.Active = true
 	if !bytes.Equal(ipmath.Hash(ip), reply.Data) {
-		err = fmt.Errorf("icmpscan hash mismatch: %s", ip)
-		h.Error = err.Error()
-		return err
+		return fmt.Errorf("icmpscan hash mismatch: %s", ip)
 	}
-
+	//echo reply! success
+	h := s.getHost(ip)
+	h.meta.Lock()
+	defer h.meta.Unlock()
+	if h.meta.receive {
+		return fmt.Errorf("icmp message double receive")
+	}
+	h.meta.receive = true
+	//mark time
+	h.Active = true
+	h.RTT = receivedAt.Sub(h.meta.sentAt)
 	if s.Hostnames {
-		server := s.DNSServer
-		if server == "" {
-			b := make([]byte, 4)
-			copy(b, []byte(ip.To4()))
-			b[3] = 1
-			server = net.IP(b).String()
-		}
-		m := dns.Msg{}
-		ipRev := strings.Split(ip.String(), ".")
-		for i, j := 0, len(ipRev)-1; i < j; i, j = i+1, j-1 {
-			ipRev[i], ipRev[j] = ipRev[j], ipRev[i]
-		}
-		target := strings.Join(ipRev, ".") + ".in-addr.arpa."
-		m.SetQuestion(target, dns.TypePTR)
-		r, _, err := s.dns.Exchange(&m, server+":53")
-		if err == nil {
-			if len(r.Answer) > 0 {
-				p := r.Answer[0].(*dns.PTR)
-				h.Hostname = strings.TrimSuffix(p.Ptr, ".")
-			}
+		name := s.lookupHostname(ip)
+		if name != "" {
+			h.Hostname = name
 		}
 	}
+	//include in final result
+	s.hostsMut.Lock()
+	s.hosts = append(s.hosts, h)
+	s.hostsMut.Unlock()
 	return nil
-}
-
-func (s *scan) resultHost(ip net.IP) *Host {
-	s.resultsMut.Lock()
-	defer s.resultsMut.Unlock()
-	ipstr := ip.String()
-	h, ok := s.results[ipstr]
-	if !ok {
-		h = &Host{IP: ip}
-		s.results[ipstr] = h
-		s.hosts = append(s.hosts, h)
-	}
-	return h
 }
