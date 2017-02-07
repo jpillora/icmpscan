@@ -3,6 +3,7 @@ package icmpscan
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"regexp"
@@ -32,6 +33,7 @@ type Spec struct {
 	Hostnames bool
 	MACs      bool
 	DNSServer string
+	Log       bool
 }
 
 //Run performs an ICMP scan/sweep with the given spec
@@ -76,6 +78,9 @@ func newScan(spec Spec) (*scan, error) {
 	s.srcProto = "ip4:icmp"
 	if s.UseUDP {
 		s.srcProto = "udp4"
+	}
+	if s.Log {
+		log.Printf("[icmpscan] create, id: %d, timeout: %s, protocol: %s", s.id, s.Timeout, s.srcProto)
 	}
 	//convert string networks to net.networks
 	s.networks = make([]*net.IPNet, len(s.Networks))
@@ -180,6 +185,10 @@ func (s *scan) run() error {
 	}
 	//sort by ip
 	sort.Sort(&s.hosts)
+	//log
+	if s.Log {
+		log.Printf("[icmpscan] complete. found #%d hosts", len(s.hosts))
+	}
 	return nil
 }
 
@@ -190,9 +199,10 @@ func (s *scan) goNetwork(network *net.IPNet) {
 }
 
 func (s *scan) network(network *net.IPNet) error {
-	//
-	// log.Printf("[icmpscan] start: scan network %s", network)
-	// defer log.Printf("[icmpscan] end: scan network %s", network)
+	if s.Log {
+		log.Printf("[icmpscan] start: scan network %s", network)
+		defer log.Printf("[icmpscan] end: scan network %s", network)
+	}
 	//icmp socket
 	conn, err := icmp.ListenPacket(s.srcProto, s.srcIP)
 	if err != nil {
@@ -229,10 +239,14 @@ func (s *scan) network(network *net.IPNet) error {
 				}
 				ip := net.ParseIP(ipStr)
 				if ip == nil {
+					log.Printf("[icmpscan] invalid ip: %s", ipStr)
 					return
 				}
 				//parse response
 				if err := s.receiveICMP(ip, network, b); err != nil {
+					if s.Log {
+						log.Printf("[icmpscan] icmp error from %s: %s", ipStr, err)
+					}
 					return
 				}
 				//signal all hosts recieved
@@ -269,8 +283,8 @@ func (s *scan) sendICMP(conn *icmp.PacketConn, ip net.IP) {
 		Type: ipv4.ICMPTypeEcho,
 		Code: 0,
 		Body: &icmp.Echo{
-			ID:   s.id,
-			Seq:  seq,
+			ID:   s.id, //scan id
+			Seq:  seq,  //echo id
 			Data: ipmath.Hash(ip),
 		},
 	}).Marshal(nil)
@@ -297,18 +311,31 @@ func (s *scan) receiveICMP(ip net.IP, network *net.IPNet, buff []byte) error {
 	if err != nil {
 		return fmt.Errorf("icmp message err: %s", err)
 	}
-	// switch b := msg.Body.(type) {
-	// case *icmp.Echo:
-	// case *icmp.DstUnreach:
-	//unknown
-	// case *icmp.PacketTooBig:
-	//unknown
-	// default:
-	//unknown
-	// }
 	reply, ok := msg.Body.(*icmp.Echo)
 	if !ok {
-		return fmt.Errorf("icmp non-echo response")
+		switch b := msg.Body.(type) {
+		case *icmp.DstUnreach:
+			dest := ""
+			switch msg.Code {
+			case 0:
+				dest = "network"
+			case 1:
+				dest = "host"
+			case 2:
+				dest = "protocol"
+			case 3:
+				dest = "port"
+			case 4:
+				dest = "must-fragment"
+			default:
+				dest = "dest"
+			}
+			return fmt.Errorf("icmp %s-unreachable", dest)
+		case *icmp.PacketTooBig:
+			return fmt.Errorf("icmp packet-too-big (mtu %d)", b.MTU)
+		default:
+			return fmt.Errorf("icmp non-echo response")
+		}
 	}
 	if !bytes.Equal(ipmath.Hash(ip), reply.Data) {
 		return fmt.Errorf("icmpscan hash mismatch: %s", ip)

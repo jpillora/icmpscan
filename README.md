@@ -1,8 +1,52 @@
 # icmpscan
 
-ICMPv4 scan all hosts across a given subnet in Go (golang)
+ICMPv4 scan all hosts across a number of subnets in Go (golang)
+
+### Programmatic Usage
 
 [![GoDoc](https://godoc.org/github.com/jpillora/icmpscan?status.svg)](https://godoc.org/github.com/jpillora/icmpscan)
+
+```go
+hosts, err := icmpscan.Run(icmpscan.Spec{
+	Hostnames: true,
+	MACs:      true,
+	Log:       true,
+})
+```
+
+### CLI
+
+**Binaries**
+
+Download [the latest release](https://github.com/jpillora/icmpscan/releases/latest), or
+
+Install latest release now with `curl https://i.jpillora.com/icmpscan! | bash`
+
+**Source**
+
+``` sh
+$ go get -v github.com/jpillora/icmpscan
+```
+
+```
+$ icmpscan --help
+
+  Usage: icmpscan [options] [networks...]
+
+  <networks> is a list of subnets to scan (defaults to all interface subnets)
+
+  Options:
+  --interface, -i   Source interface (default chosen by OS)
+  --timeout, -t     Scan timeout (default 1s)
+  --dns-server, -d  Server to perform reverse DNS lookups against (defaults to X.X.X.1)
+  --json, -j        Output results in JSON
+  --log, -l         Log actions to stderr
+  --help, -h
+  --version, -v
+
+  Version:
+    0.0.0-src
+```
 
 #### MIT License
 

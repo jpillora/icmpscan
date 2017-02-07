@@ -12,6 +12,7 @@ import (
 	"github.com/jpillora/opts"
 )
 
+//VERSION is set at compile time
 var VERSION = "0.0.0-src"
 
 func main() {
@@ -21,6 +22,7 @@ func main() {
 		Timeout   time.Duration `help:"Scan timeout"`
 		DNSServer string        `help:"Server to perform reverse DNS lookups against (defaults to X.X.X.1)"`
 		JSON      bool          `help:"Output results in JSON"`
+		Log       bool          `help:"Log actions to stderr"`
 	}{
 		Timeout: 1000 * time.Millisecond,
 	}
@@ -37,6 +39,7 @@ func main() {
 		Hostnames: true,
 		MACs:      true,
 		DNSServer: c.DNSServer,
+		Log:       c.Log,
 	})
 	if err != nil {
 		log.Fatal(err)

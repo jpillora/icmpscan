@@ -34,17 +34,6 @@ func (s *scan) lookupHostname(ip net.IP) string {
 		}
 		wg.Done()
 	}()
-	//send to host (netbios name service)
-	go func() {
-		//give the host a slight headstart
-		time.Sleep(5 * time.Millisecond)
-		//use provided or guessed dns server address
-		hostname, err := lookupNetBIOSName(ip)
-		if err == nil {
-			result <- hostname
-		}
-		wg.Done()
-	}()
 	//send to router (dns)
 	go func() {
 		//give the host a slight headstart
@@ -66,6 +55,17 @@ func (s *scan) lookupHostname(ip net.IP) string {
 		}
 		wg.Done()
 	}()
+	//send to host (netbios name service)
+	go func() {
+		//give the host a slight headstart
+		time.Sleep(5 * time.Millisecond)
+		//use provided or guessed dns server address
+		hostname, err := lookupNetBIOSName(ip)
+		if err == nil {
+			result <- hostname
+		}
+		wg.Done()
+	}()
 	//close after all 3 have returned
 	go func() {
 		wg.Wait()
@@ -84,6 +84,9 @@ func lookupNetBIOSName(ip net.IP) (string, error) {
 		return "", err
 	}
 	conn, err := net.Dial("udp", ip.String()+":137")
+	if err != nil {
+		return "", err
+	}
 	if _, err := conn.Write(b); err != nil {
 		return "", err
 	}
@@ -119,6 +122,9 @@ func lookupNetBIOSName(ip net.IP) (string, error) {
 	}
 	// hostname := string(b[:offset])
 	b = b[offset+1:]
+	if len(b) < 12 {
+		return "", fmt.Errorf("no answer")
+	}
 	// rtype := binary.BigEndian.Uint16(b[:2])
 	// rclass := binary.BigEndian.Uint16(b[2:4])
 	// ttl := binary.BigEndian.Uint32(b[4:8])
