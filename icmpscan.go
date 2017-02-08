@@ -220,50 +220,25 @@ func (s *scan) network(network *net.IPNet) error {
 		//build icmp
 		go s.sendICMP(conn, curr)
 	}
-	//channel open while reading responses
-	recievedAll := make(chan struct{})
 	//receive
-	readErr := make(chan error)
+	done := make(chan error, 1)
 	go func() {
 		for {
 			buff := make([]byte, 512)
 			n, ra, err := conn.ReadFrom(buff)
 			if err != nil {
-				readErr <- err
+				done <- err
 				return
 			}
-			go func(ra net.Addr, b []byte) {
-				ipStr := ra.String()
-				if s.UseUDP {
-					ipStr = strings.TrimSuffix(ipStr, ":0")
-				}
-				ip := net.ParseIP(ipStr)
-				if ip == nil {
-					log.Printf("[icmpscan] invalid ip: %s", ipStr)
-					return
-				}
-				//parse response
-				if err := s.receiveICMP(ip, network, b); err != nil {
-					if s.Log {
-						log.Printf("[icmpscan] icmp error from %s: %s", ipStr, err)
-					}
-					return
-				}
-				//signal all hosts recieved
-				if atomic.AddUint32(&s.recvSuccess, 1) == s.sentSuccess {
-					close(recievedAll)
-				}
-			}(ra, buff[:n])
+			go s.receiveICMPBytes(ra, network, buff[:n], done)
 		}
 	}()
 	//wait
 	select {
-	case <-recievedAll:
-		return nil
+	case err := <-done:
+		return err
 	case <-time.After(s.Timeout):
 		return nil
-	case <-readErr:
-		return err
 	}
 }
 
@@ -302,6 +277,30 @@ func (s *scan) sendICMP(conn *icmp.PacketConn, ip net.IP) {
 	}
 	h.meta.sentAt = time.Now()
 	atomic.AddUint32(&s.sentSuccess, 1)
+}
+
+func (s *scan) receiveICMPBytes(ra net.Addr, network *net.IPNet, buff []byte, done chan error) {
+	ipStr := ra.String()
+	if s.UseUDP {
+		ipStr = strings.TrimSuffix(ipStr, ":0")
+	}
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		log.Printf("[icmpscan] invalid ip: %s", ipStr)
+		return
+	}
+	//parse response
+	if err := s.receiveICMP(ip, network, buff); err != nil {
+		if s.Log {
+			log.Printf("[icmpscan] icmp error from %s: %s", ipStr, err)
+		}
+		return
+	}
+	//signal all hosts recieved
+	if atomic.AddUint32(&s.recvSuccess, 1) == s.sentSuccess {
+		done <- nil
+	}
+	return
 }
 
 func (s *scan) receiveICMP(ip net.IP, network *net.IPNet, buff []byte) error {
