@@ -87,6 +87,8 @@ func lookupNetBIOSName(ip net.IP) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(2 * time.Second))
 	if _, err := conn.Write(b); err != nil {
 		return "", err
 	}
