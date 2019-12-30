@@ -1,5 +1,6 @@
 builds:
-  - env:
+  - main: ./cmd/icmpscan
+    env:
       - CGO_ENABLED=0
     goos:
       - linux

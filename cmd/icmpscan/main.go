@@ -18,7 +18,7 @@ var VERSION = "0.0.0-src"
 func main() {
 	c := struct {
 		Interface string        `help:"Source interface" default:"chosen by OS"`
-		Networks  []string      `type:"args" help:"<networks> is a list of subnets to scan (defaults to all interface subnets)"`
+		Networks  []string      `mode:"arg" help:"[network] is a subnet to scan (defaults to all interface subnets)"`
 		Timeout   time.Duration `help:"Scan timeout"`
 		DNSServer string        `help:"Server to perform reverse DNS lookups against (defaults to X.X.X.1)"`
 		JSON      bool          `help:"Output results in JSON"`
