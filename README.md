@@ -2,19 +2,15 @@
 
 ICMPv4 scan all hosts across a number of subnets in Go (golang)
 
-### Programmatic Usage
-
-[![GoDoc](https://godoc.org/github.com/jpillora/icmpscan?status.svg)](https://godoc.org/github.com/jpillora/icmpscan)
-
-```go
-hosts, err := icmpscan.Run(icmpscan.Spec{
-	Hostnames: true,
-	MACs:      true,
-	Log:       true,
-})
-```
-
 ### CLI
+
+---
+
+> [!WARNING]
+> This project is deprecated.
+> Please use https://github.com/ramonvermeulen/whosthere instead.
+
+---
 
 **Binaries**
 
@@ -46,6 +42,18 @@ $ icmpscan --help
 
   Version:
     0.0.0-src
+```
+
+### Programmatic Usage
+
+[![GoDoc](https://godoc.org/github.com/jpillora/icmpscan?status.svg)](https://godoc.org/github.com/jpillora/icmpscan)
+
+```go
+hosts, err := icmpscan.Run(icmpscan.Spec{
+	Hostnames: true,
+	MACs:      true,
+	Log:       true,
+})
 ```
 
 #### MIT License
